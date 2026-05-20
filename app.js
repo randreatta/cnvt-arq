@@ -1,6 +1,8 @@
 'use strict';
 
-// ── Mapa de conversões suportadas ────────────────────────────────────────────
+// ── Constantes ───────────────────────────────────────────────────────────────
+const MAX_FILES = 20;
+
 const CONVERSION_MAP = {
   csv:  ['xlsx', 'xls'],
   xlsx: ['csv', 'xls'],
@@ -18,411 +20,374 @@ const CONVERSION_MAP = {
 };
 
 const FORMAT_NAMES = {
-  csv:  'CSV', xlsx: 'Excel Moderno (.xlsx)', xls: 'Excel Legado (.xls)',
-  docx: 'Word (.docx)', pdf: 'PDF', txt: 'Texto Simples (.txt)',
-  jpeg: 'JPEG', jpg: 'JPEG', png: 'PNG', webp: 'WebP',
-  bmp:  'BMP', gif: 'GIF', tiff: 'TIFF', tif: 'TIFF',
+  csv: 'CSV', xlsx: 'Excel (.xlsx)', xls: 'Excel 97 (.xls)',
+  pdf: 'PDF', docx: 'Word (.docx)', txt: 'Texto (.txt)',
+  jpeg: 'JPEG', jpg: 'JPEG', png: 'PNG',
+  webp: 'WebP', bmp: 'BMP', gif: 'GIF', tiff: 'TIFF', tif: 'TIFF',
 };
 
 const LOSSY_OUTPUT  = new Set(['jpeg', 'jpg', 'webp']);
 const IMAGE_FORMATS = new Set(['jpeg', 'jpg', 'png', 'webp', 'bmp', 'gif', 'tiff', 'tif']);
 const SHEET_FORMATS = new Set(['csv', 'xlsx', 'xls']);
 
-// ── Estado ───────────────────────────────────────────────────────────────────
-let currentFile      = null;
-let currentExt       = null;
-let selectedFormat   = null;
-let selectedQuality  = 85;
-let qualitySupported = false;
-let resultBlob       = null;
-let resultName       = null;
+// ── Estado global ────────────────────────────────────────────────────────────
+let fileQueue     = [];   // Array de FileEntry
+let globalQuality = 85;
+let isConverting  = false;
 
 // ── DOM ───────────────────────────────────────────────────────────────────────
-const dropZone       = document.getElementById('dropZone');
 const fileInput      = document.getElementById('fileInput');
-const stepUpload     = document.getElementById('step-upload');
-const stepConvert    = document.getElementById('step-convert');
-const stepDownload   = document.getElementById('step-download');
-const loadingSection = document.getElementById('loading');
-const btnConvert     = document.getElementById('btnConvert');
-const errorBox       = document.getElementById('error-box');
-const errorText      = document.getElementById('error-text');
+const dropZone       = document.getElementById('dropZone');
+const viewEmpty      = document.getElementById('view-empty');
+const viewList       = document.getElementById('view-list');
+const fileListEl     = document.getElementById('fileList');
+const fileCountEl    = document.getElementById('fileCount');
 const qualitySection = document.getElementById('qualitySection');
 const qualitySlider  = document.getElementById('qualitySlider');
-const qualityValue   = document.getElementById('qualityValue');
+const qualityValueEl = document.getElementById('qualityValue');
+const btnConvertAll  = document.getElementById('btnConvertAll');
+const progressText   = document.getElementById('progressText');
+const batchResult    = document.getElementById('batchResult');
+const resultSummary  = document.getElementById('resultSummary');
 
-// ── Drag & drop ───────────────────────────────────────────────────────────────
+// ── Drag & drop — tela inicial ────────────────────────────────────────────────
 dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('dragover',  (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
-dropZone.addEventListener('drop', (e) => {
+dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
   e.preventDefault();
   dropZone.classList.remove('drag-over');
-  const f = e.dataTransfer.files[0];
-  if (f) handleFileSelect(f);
+  handleFiles(e.dataTransfer.files);
 });
+
+// ── Drag & drop — sobre a lista (adicionar mais) ──────────────────────────────
+function onListDragOver(e) {
+  e.preventDefault();
+  fileListEl.classList.add('drag-over');
+}
+function onListDragLeave(e) {
+  if (!fileListEl.contains(e.relatedTarget)) fileListEl.classList.remove('drag-over');
+}
+function onListDrop(e) {
+  e.preventDefault();
+  fileListEl.classList.remove('drag-over');
+  handleFiles(e.dataTransfer.files);
+}
+
+// ── Input file ────────────────────────────────────────────────────────────────
 fileInput.addEventListener('change', () => {
-  if (fileInput.files[0]) handleFileSelect(fileInput.files[0]);
+  handleFiles(fileInput.files);
+  fileInput.value = '';
 });
 
 // ── Slider de qualidade ───────────────────────────────────────────────────────
 qualitySlider.addEventListener('input', () => {
-  selectedQuality = parseInt(qualitySlider.value, 10);
-  qualityValue.textContent = `${selectedQuality}%`;
+  globalQuality = parseInt(qualitySlider.value, 10);
+  qualityValueEl.textContent = `${globalQuality}%`;
   updateSliderFill();
   syncPresetButtons();
 });
 
+function setQuality(v) {
+  globalQuality = v;
+  qualitySlider.value = v;
+  qualityValueEl.textContent = `${v}%`;
+  updateSliderFill();
+  syncPresetButtons();
+}
+
 function updateSliderFill() {
-  const pct = ((selectedQuality - 1) / 99) * 100;
+  const pct = ((globalQuality - 1) / 99) * 100;
   qualitySlider.style.background =
     `linear-gradient(to right, var(--primary) ${pct}%, var(--border) ${pct}%)`;
 }
 
 function syncPresetButtons() {
-  document.querySelectorAll('.preset-btn').forEach(btn => {
-    btn.classList.toggle('active', parseInt(btn.dataset.q, 10) === selectedQuality);
-  });
+  document.querySelectorAll('.preset-btn').forEach(b =>
+    b.classList.toggle('active', parseInt(b.dataset.q, 10) === globalQuality)
+  );
 }
 
-function setQuality(value) {
-  selectedQuality = value;
-  qualitySlider.value = value;
-  qualityValue.textContent = `${value}%`;
-  updateSliderFill();
-  syncPresetButtons();
-}
-
-// ── Seleção de arquivo ────────────────────────────────────────────────────────
-function handleFileSelect(file) {
+// ── Receber arquivos ──────────────────────────────────────────────────────────
+function handleFiles(rawFiles) {
   clearError();
-  const ext = file.name.split('.').pop().toLowerCase();
+  const incoming = Array.from(rawFiles);
+  const errors   = [];
+  const toAdd    = [];
 
-  if (!CONVERSION_MAP[ext]) {
-    showStep(stepUpload);
-    showError(`Formato '.${ext}' não suportado.`);
+  for (const file of incoming) {
+    if (fileQueue.length + toAdd.length >= MAX_FILES) {
+      errors.push(`Limite de ${MAX_FILES} arquivos atingido. Alguns arquivos foram ignorados.`);
+      break;
+    }
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!CONVERSION_MAP[ext]) {
+      errors.push(`"${file.name}" — formato .${ext} não suportado.`);
+      continue;
+    }
+    toAdd.push(new FileEntry(file, ext));
+  }
+
+  fileQueue.push(...toAdd);
+
+  if (errors.length) showError(errors[0]);
+  if (fileQueue.length > 0) renderView();
+}
+
+// ── FileEntry ─────────────────────────────────────────────────────────────────
+class FileEntry {
+  constructor(file, ext) {
+    this.id           = Math.random().toString(36).slice(2, 10);
+    this.file         = file;
+    this.ext          = ext;
+    this.targetFormat = CONVERSION_MAP[ext][0];
+    this.status       = 'pending';   // pending | converting | done | error
+    this.resultBlob   = null;
+    this.resultName   = null;
+    this.errorMsg     = null;
+  }
+}
+
+// ── Views ─────────────────────────────────────────────────────────────────────
+function renderView() {
+  if (fileQueue.length === 0) {
+    viewEmpty.classList.remove('hidden');
+    viewList.classList.add('hidden');
     return;
   }
-
-  currentFile  = file;
-  currentExt   = ext;
-  selectedFormat = null;
-  resultBlob   = null;
-  resultName   = null;
-
-  renderConvertStep(file, ext);
+  viewEmpty.classList.add('hidden');
+  viewList.classList.remove('hidden');
+  renderFileList();
+  updateCounter();
+  checkQualityVisibility();
+  resetBatchResult();
 }
 
-function renderConvertStep(file, ext) {
-  document.getElementById('detectedFilename').textContent = file.name;
-  document.getElementById('detectedFormat').textContent   = ext.toUpperCase();
-  document.getElementById('fileSize').textContent         = formatBytes(file.size);
-
-  const container = document.getElementById('formatOptions');
-  container.innerHTML = '';
-
-  CONVERSION_MAP[ext].forEach(fmt => {
-    const supportsQuality = LOSSY_OUTPUT.has(fmt);
-    const btn = document.createElement('button');
-    btn.className              = 'format-option';
-    btn.dataset.format         = fmt;
-    btn.dataset.qualitySupport = supportsQuality ? '1' : '0';
-    btn.innerHTML = `
-      <span class="format-ext">.${fmt}</span>
-      <span class="format-name">${FORMAT_NAMES[fmt] || fmt.toUpperCase()}</span>
-    `;
-    btn.addEventListener('click', () => pickFormat(btn, fmt, supportsQuality));
-    container.appendChild(btn);
-  });
-
-  qualitySection.classList.add('hidden');
-  qualitySupported    = false;
-  btnConvert.disabled = true;
-  setQuality(85);
-
-  showStep(stepConvert);
+function renderFileList() {
+  fileListEl.innerHTML = '';
+  fileQueue.forEach(entry => fileListEl.appendChild(buildRow(entry)));
 }
 
-function pickFormat(btn, format, supportsQuality) {
-  document.querySelectorAll('.format-option').forEach(b => b.classList.remove('selected'));
-  btn.classList.add('selected');
-  selectedFormat   = format;
-  qualitySupported = supportsQuality;
-  btnConvert.disabled = false;
-  qualitySection.classList.toggle('hidden', !supportsQuality);
+function buildRow(entry) {
+  const div = document.createElement('div');
+  div.className = 'file-row';
+  div.id = `row-${entry.id}`;
+
+  const options = CONVERSION_MAP[entry.ext]
+    .map(f => `<option value="${f}"${f === entry.targetFormat ? ' selected' : ''}>${FORMAT_NAMES[f]}</option>`)
+    .join('');
+
+  div.innerHTML = `
+    <svg class="row-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/>
+    </svg>
+    <span class="row-name" title="${entry.file.name}">${truncate(entry.file.name, 28)}</span>
+    <span class="row-badge">${entry.ext.toUpperCase()}</span>
+    <svg class="row-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <line x1="5" y1="12" x2="19" y2="12"/>
+      <polyline points="12 5 19 12 12 19"/>
+    </svg>
+    <select class="format-select" id="sel-${entry.id}"
+            onchange="onFormatChange('${entry.id}', this.value)">
+      ${options}
+    </select>
+    <span class="status-badge status-pending" id="status-${entry.id}">Aguardando</span>
+    <button class="btn-row-remove" id="rm-${entry.id}"
+            onclick="removeFile('${entry.id}')" title="Remover">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+  `;
+  return div;
 }
 
-// ── Dispatcher de conversão ───────────────────────────────────────────────────
-async function convertFile() {
-  if (!selectedFormat || !currentFile) return;
-
-  const isDocxPdf = currentExt === 'docx' && selectedFormat === 'pdf';
-  showLoading(isDocxPdf
-    ? 'Convertendo DOCX → PDF (pode levar alguns segundos)...'
-    : 'Convertendo arquivo...'
-  );
-
-  // Dá tempo ao browser de renderizar o spinner antes de bloquear
-  await new Promise(r => setTimeout(r, 60));
-
-  try {
-    let blob;
-    if (IMAGE_FORMATS.has(currentExt)) {
-      blob = await convertImage(currentFile, selectedFormat, selectedQuality);
-    } else if (SHEET_FORMATS.has(currentExt)) {
-      blob = await convertSpreadsheet(currentFile, currentExt, selectedFormat);
-    } else if (currentExt === 'docx') {
-      blob = await convertDocxToPdf(currentFile);
-    } else if (currentExt === 'txt') {
-      blob = await convertTxtToPdf(currentFile);
-    } else {
-      throw new Error('Conversão não suportada.');
-    }
-
-    const stem = currentFile.name.replace(/\.[^/.]+$/, '');
-    resultBlob = blob;
-    resultName = `${stem}_convertido.${selectedFormat}`;
-
-    renderDownloadStep();
-  } catch (err) {
-    hideLoading();
-    showStep(stepConvert);
-    showError(err.message || 'Erro desconhecido na conversão.');
-  }
+function onFormatChange(id, format) {
+  const entry = fileQueue.find(e => e.id === id);
+  if (entry) entry.targetFormat = format;
+  checkQualityVisibility();
 }
 
-function renderDownloadStep() {
-  hideLoading();
-
-  const url  = URL.createObjectURL(resultBlob);
-  const link = document.getElementById('downloadLink');
-  link.href     = url;
-  link.download = resultName;
-
-  const qualityNote = qualitySupported ? ` (qualidade ${selectedQuality}%)` : '';
-  document.getElementById('conversionInfo').textContent =
-    `${currentFile.name}  →  ${resultName}${qualityNote}`;
-
-  showStep(stepDownload);
+function removeFile(id) {
+  if (isConverting) return;
+  fileQueue = fileQueue.filter(e => e.id !== id);
+  renderView();
 }
 
-// ── Conversão de imagens (Canvas API) ────────────────────────────────────────
-async function convertImage(file, targetFmt, quality) {
-  if (targetFmt === 'pdf') return _imageToPdf(file);
-
-  return new Promise((resolve, reject) => {
-    const img    = new Image();
-    const objUrl = URL.createObjectURL(file);
-
-    img.onload = () => {
-      URL.revokeObjectURL(objUrl);
-      const canvas = document.createElement('canvas');
-      canvas.width  = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext('2d');
-
-      if (['jpeg', 'jpg'].includes(targetFmt)) {
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      }
-
-      ctx.drawImage(img, 0, 0);
-
-      const mimeMap = {
-        jpeg: 'image/jpeg', jpg: 'image/jpeg',
-        png:  'image/png',  webp: 'image/webp',
-      };
-      const mime = mimeMap[targetFmt] || 'image/png';
-      const q    = LOSSY_OUTPUT.has(targetFmt) ? quality / 100 : undefined;
-
-      canvas.toBlob(blob => {
-        if (blob) resolve(blob);
-        else reject(new Error(`Seu navegador não suporta exportar para ${targetFmt.toUpperCase()}.`));
-      }, mime, q);
-    };
-
-    img.onerror = () => {
-      URL.revokeObjectURL(objUrl);
-      reject(new Error('Não foi possível carregar a imagem. Verifique se o arquivo não está corrompido.'));
-    };
-    img.src = objUrl;
-  });
-}
-
-async function _imageToPdf(file) {
-  const { jsPDF } = window.jspdf;
-  if (!jsPDF) throw new Error('jsPDF não carregado.');
-
-  return new Promise((resolve, reject) => {
-    const img    = new Image();
-    const objUrl = URL.createObjectURL(file);
-
-    img.onload = () => {
-      URL.revokeObjectURL(objUrl);
-      const canvas = document.createElement('canvas');
-      canvas.width  = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0);
-
-      const isLandscape = img.naturalWidth > img.naturalHeight;
-      const doc = new jsPDF({ orientation: isLandscape ? 'l' : 'p', unit: 'pt', format: 'a4' });
-      const pw  = doc.internal.pageSize.getWidth();
-      const ph  = doc.internal.pageSize.getHeight();
-      const margin = 40;
-      const maxW   = pw - 2 * margin;
-      const maxH   = ph - 2 * margin;
-
-      let iw = img.naturalWidth  * 0.75;
-      let ih = img.naturalHeight * 0.75;
-      if (iw > maxW) { ih *= maxW / iw; iw  = maxW; }
-      if (ih > maxH) { iw *= maxH / ih; ih  = maxH; }
-
-      const x = (pw - iw) / 2;
-      const y = (ph - ih) / 2;
-
-      doc.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', x, y, iw, ih);
-      resolve(doc.output('blob'));
-    };
-
-    img.onerror = () => {
-      URL.revokeObjectURL(objUrl);
-      reject(new Error('Não foi possível carregar a imagem.'));
-    };
-    img.src = objUrl;
-  });
-}
-
-// ── Conversão de planilhas (SheetJS) ─────────────────────────────────────────
-async function convertSpreadsheet(file, srcFmt, dstFmt) {
-  if (typeof XLSX === 'undefined') throw new Error('SheetJS não carregado.');
-
-  const arrayBuffer = await file.arrayBuffer();
-  const workbook    = XLSX.read(arrayBuffer, { type: 'array' });
-
-  if (dstFmt === 'csv') {
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const csv   = XLSX.utils.sheet_to_csv(sheet);
-    // BOM para que o Excel abra corretamente com acentos
-    return new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
-  }
-
-  const mimeMap = {
-    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    xls:  'application/vnd.ms-excel',
-  };
-  const output = XLSX.write(workbook, { bookType: dstFmt, type: 'array' });
-  return new Blob([output], { type: mimeMap[dstFmt] });
-}
-
-// ── DOCX → PDF (mammoth.js + jsPDF + html2canvas) ────────────────────────────
-async function convertDocxToPdf(file) {
-  if (typeof mammoth  === 'undefined') throw new Error('mammoth.js não carregado.');
-  if (typeof html2canvas === 'undefined') throw new Error('html2canvas não carregado.');
-  const { jsPDF } = window.jspdf;
-  if (!jsPDF) throw new Error('jsPDF não carregado.');
-
-  const arrayBuffer = await file.arrayBuffer();
-  const { value: html } = await mammoth.convertToHtml({ arrayBuffer });
-
-  const container = document.createElement('div');
-  container.style.cssText = [
-    'position:fixed', 'top:-9999px', 'left:-9999px',
-    'width:720px', 'padding:20px 30px',
-    'font-family:Arial,sans-serif', 'font-size:11pt', 'line-height:1.6',
-    'color:#000000', 'background:#ffffff',
-  ].join(';');
-  container.innerHTML = html;
-  document.body.appendChild(container);
-
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-
-  await new Promise((resolve) => {
-    doc.html(container, {
-      callback:    resolve,
-      margin:      [45, 45, 45, 45],
-      html2canvas: { scale: 0.72, useCORS: true, backgroundColor: '#ffffff' },
-      width:       505,
-      windowWidth: 760,
-      x: 0,
-      y: 0,
-    });
-  });
-
-  document.body.removeChild(container);
-  return doc.output('blob');
-}
-
-// ── TXT → PDF (jsPDF) ────────────────────────────────────────────────────────
-async function convertTxtToPdf(file) {
-  const { jsPDF } = window.jspdf;
-  if (!jsPDF) throw new Error('jsPDF não carregado.');
-
-  const text   = await file.text();
-  const doc    = new jsPDF({ unit: 'pt', format: 'a4' });
-  const pw     = doc.internal.pageSize.getWidth();
-  const ph     = doc.internal.pageSize.getHeight();
-  const margin = 50;
-  const lh     = 14;
-  const maxW   = pw - 2 * margin;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-
-  let y = margin;
-  for (const line of text.split('\n')) {
-    for (const wl of doc.splitTextToSize(line || ' ', maxW)) {
-      if (y + lh > ph - margin) { doc.addPage(); y = margin; }
-      doc.text(wl, margin, y);
-      y += lh;
-    }
-  }
-
-  return doc.output('blob');
-}
-
-// ── Reset ─────────────────────────────────────────────────────────────────────
-function resetToUpload() {
-  if (resultBlob) {
-    URL.revokeObjectURL(document.getElementById('downloadLink').href);
-  }
-  currentFile      = null;
-  currentExt       = null;
-  selectedFormat   = null;
-  qualitySupported = false;
-  resultBlob       = null;
-  resultName       = null;
-  fileInput.value  = '';
-  qualitySection.classList.add('hidden');
+function clearAll() {
+  fileQueue    = [];
+  isConverting = false;
+  renderView();
   clearError();
-  showStep(stepUpload);
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function showStep(activeSection) {
-  [stepUpload, stepConvert, stepDownload, loadingSection].forEach(s => {
-    s.classList.toggle('hidden', s !== activeSection);
+function updateCounter() {
+  fileCountEl.textContent = fileQueue.length;
+  const btnAdd = document.getElementById('btnAddMore');
+  if (btnAdd) btnAdd.disabled = fileQueue.length >= MAX_FILES;
+}
+
+function checkQualityVisibility() {
+  const needsQuality = fileQueue.some(e => LOSSY_OUTPUT.has(e.targetFormat));
+  qualitySection.classList.toggle('hidden', !needsQuality);
+}
+
+function resetBatchResult() {
+  batchResult.classList.add('hidden');
+  progressText.classList.add('hidden');
+  btnConvertAll.classList.remove('hidden');
+  btnConvertAll.disabled = false;
+}
+
+// ── Conversão em lote ─────────────────────────────────────────────────────────
+async function convertAll() {
+  if (isConverting || fileQueue.length === 0) return;
+  isConverting = true;
+
+  btnConvertAll.disabled = true;
+  progressText.classList.remove('hidden');
+
+  const total = fileQueue.length;
+  let done = 0;
+
+  for (const entry of fileQueue) {
+    progressText.textContent = `Convertendo ${done + 1} de ${total}...`;
+    setRowStatus(entry.id, 'converting');
+    await new Promise(r => setTimeout(r, 40));   // renderiza o spinner
+
+    try {
+      entry.resultBlob = await runConversion(entry);
+      const stem = entry.file.name.replace(/\.[^/.]+$/, '');
+      entry.resultName = `${stem}_convertido.${entry.targetFormat}`;
+      entry.status = 'done';
+      setRowStatus(entry.id, 'done');
+    } catch (err) {
+      entry.status   = 'error';
+      entry.errorMsg = err.message || 'Erro desconhecido';
+      setRowStatus(entry.id, 'error', entry.errorMsg);
+    }
+
+    done++;
+  }
+
+  isConverting = false;
+  showBatchResult(total);
+}
+
+async function runConversion(entry) {
+  const { file, ext, targetFormat } = entry;
+  if (IMAGE_FORMATS.has(ext))    return convertImage(file, targetFormat, globalQuality);
+  if (SHEET_FORMATS.has(ext))    return convertSpreadsheet(file, ext, targetFormat);
+  if (ext === 'docx')            return convertDocxToPdf(file);
+  if (ext === 'txt')             return convertTxtToPdf(file);
+  throw new Error('Conversão não suportada.');
+}
+
+function showBatchResult(total) {
+  const succeeded = fileQueue.filter(e => e.status === 'done').length;
+  const failed    = total - succeeded;
+
+  progressText.classList.add('hidden');
+  btnConvertAll.classList.add('hidden');
+  batchResult.classList.remove('hidden');
+
+  if (failed === 0) {
+    resultSummary.innerHTML =
+      `<span class="result-ok">✓ ${succeeded} arquivo${succeeded > 1 ? 's' : ''} convertido${succeeded > 1 ? 's' : ''} com sucesso</span>`;
+  } else {
+    resultSummary.innerHTML =
+      `<span class="result-ok">✓ ${succeeded} convertido${succeeded > 1 ? 's' : ''}</span>` +
+      `<span class="result-err"> · ${failed} com erro</span>`;
+  }
+
+  document.getElementById('btnDownloadZip').disabled = succeeded === 0;
+}
+
+// ── Download ZIP ──────────────────────────────────────────────────────────────
+async function downloadZip() {
+  const done = fileQueue.filter(e => e.status === 'done' && e.resultBlob);
+  if (done.length === 0) return;
+
+  const btn = document.getElementById('btnDownloadZip');
+  btn.textContent = 'Gerando ZIP...';
+  btn.disabled = true;
+
+  const zip   = new JSZip();
+  const names = deduplicateNames(done.map(e => e.resultName));
+
+  done.forEach((entry, i) => zip.file(names[i], entry.resultBlob));
+
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `cnvt-arq_${Date.now()}.zip`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  btn.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+    </svg>
+    Baixar ZIP`;
+  btn.disabled = false;
+}
+
+function deduplicateNames(names) {
+  const seen = {};
+  return names.map(name => {
+    if (seen[name] === undefined) { seen[name] = 0; return name; }
+    seen[name]++;
+    const ext  = name.split('.').pop();
+    const stem = name.slice(0, -(ext.length + 1));
+    return `${stem}_${seen[name]}.${ext}`;
   });
 }
 
-function showLoading(text) {
-  document.getElementById('loadingText').textContent = text;
-  [stepUpload, stepConvert, stepDownload].forEach(s => s.classList.add('hidden'));
-  loadingSection.classList.remove('hidden');
+// ── Status por linha ──────────────────────────────────────────────────────────
+const STATUS_CONFIG = {
+  pending:    { cls: 'status-pending',    html: 'Aguardando' },
+  converting: { cls: 'status-converting', html: '<span class="mini-spin"></span>Convertendo' },
+  done:       { cls: 'status-done',       html: '✓ Concluído' },
+  error:      { cls: 'status-error',      html: '✗ Erro' },
+};
+
+function setRowStatus(id, status, errorMsg) {
+  const badge = document.getElementById(`status-${id}`);
+  if (!badge) return;
+  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
+  badge.className = `status-badge ${cfg.cls}`;
+  badge.innerHTML = cfg.html;
+  if (errorMsg) badge.title = errorMsg;
+
+  // desabilita select e remove button durante/após conversão
+  const select = document.getElementById(`sel-${id}`);
+  const rm     = document.getElementById(`rm-${id}`);
+  if (select) select.disabled = status === 'converting' || status === 'done' || status === 'error';
+  if (rm)     rm.style.visibility = (status === 'converting') ? 'hidden' : 'visible';
 }
 
-function hideLoading() { loadingSection.classList.add('hidden'); }
-
+// ── Utilitários de UI ─────────────────────────────────────────────────────────
 function showError(msg) {
-  errorText.textContent = msg;
-  errorBox.classList.remove('hidden');
+  const box  = document.getElementById('error-box');
+  const text = document.getElementById('error-text');
+  if (!box || !text) return;
+  text.textContent = msg;
+  box.classList.remove('hidden');
 }
 
 function clearError() {
-  errorText.textContent = '';
-  errorBox.classList.add('hidden');
+  const box = document.getElementById('error-box');
+  if (box) box.classList.add('hidden');
+}
+
+function truncate(str, max) {
+  if (str.length <= max) return str;
+  const ext  = str.includes('.') ? '.' + str.split('.').pop() : '';
+  const stem = str.slice(0, str.length - ext.length);
+  return stem.slice(0, max - ext.length - 1) + '…' + ext;
 }
 
 function formatBytes(bytes) {
@@ -431,8 +396,116 @@ function formatBytes(bytes) {
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 }
 
+// ── Conversão de imagens (Canvas API) ────────────────────────────────────────
+async function convertImage(file, targetFmt, quality) {
+  if (targetFmt === 'pdf') return _imageToPdf(file);
+  return new Promise((resolve, reject) => {
+    const img    = new Image();
+    const objUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objUrl);
+      const canvas = document.createElement('canvas');
+      canvas.width  = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (['jpeg', 'jpg'].includes(targetFmt)) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      ctx.drawImage(img, 0, 0);
+      const mime = { jpeg: 'image/jpeg', jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[targetFmt] || 'image/png';
+      const q    = LOSSY_OUTPUT.has(targetFmt) ? quality / 100 : undefined;
+      canvas.toBlob(blob => {
+        if (blob) resolve(blob);
+        else reject(new Error(`Seu navegador não suporta exportar para ${targetFmt.toUpperCase()}.`));
+      }, mime, q);
+    };
+    img.onerror = () => { URL.revokeObjectURL(objUrl); reject(new Error('Não foi possível carregar a imagem.')); };
+    img.src = objUrl;
+  });
+}
+
+async function _imageToPdf(file) {
+  const { jsPDF } = window.jspdf;
+  return new Promise((resolve, reject) => {
+    const img    = new Image();
+    const objUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objUrl);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      const doc    = new jsPDF({ orientation: img.naturalWidth > img.naturalHeight ? 'l' : 'p', unit: 'pt', format: 'a4' });
+      const pw     = doc.internal.pageSize.getWidth();
+      const ph     = doc.internal.pageSize.getHeight();
+      const margin = 40; const maxW = pw - 2 * margin; const maxH = ph - 2 * margin;
+      let iw = img.naturalWidth * 0.75; let ih = img.naturalHeight * 0.75;
+      if (iw > maxW) { ih *= maxW / iw; iw = maxW; }
+      if (ih > maxH) { iw *= maxH / ih; ih = maxH; }
+      doc.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', (pw - iw) / 2, (ph - ih) / 2, iw, ih);
+      resolve(doc.output('blob'));
+    };
+    img.onerror = () => { URL.revokeObjectURL(objUrl); reject(new Error('Não foi possível carregar a imagem.')); };
+    img.src = objUrl;
+  });
+}
+
+// ── Conversão de planilhas (SheetJS) ─────────────────────────────────────────
+async function convertSpreadsheet(file, srcFmt, dstFmt) {
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+  if (dstFmt === 'csv') {
+    const csv = XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]]);
+    return new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  }
+  const mime = { xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xls: 'application/vnd.ms-excel' };
+  return new Blob([XLSX.write(wb, { bookType: dstFmt, type: 'array' })], { type: mime[dstFmt] });
+}
+
+// ── DOCX → PDF (mammoth + jsPDF + html2canvas) ───────────────────────────────
+async function convertDocxToPdf(file) {
+  const { value: html } = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
+  const container = document.createElement('div');
+  container.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:720px;padding:20px 30px;font-family:Arial,sans-serif;font-size:11pt;line-height:1.6;color:#000;background:#fff;';
+  container.innerHTML = html;
+  document.body.appendChild(container);
+  const doc = new (window.jspdf.jsPDF)({ unit: 'pt', format: 'a4' });
+  await new Promise(resolve => doc.html(container, {
+    callback: resolve, margin: [45, 45, 45, 45],
+    html2canvas: { scale: 0.72, useCORS: true, backgroundColor: '#ffffff' },
+    width: 505, windowWidth: 760, x: 0, y: 0,
+  }));
+  document.body.removeChild(container);
+  return doc.output('blob');
+}
+
+// ── TXT → PDF (jsPDF) ────────────────────────────────────────────────────────
+async function convertTxtToPdf(file) {
+  const doc    = new (window.jspdf.jsPDF)({ unit: 'pt', format: 'a4' });
+  const pw     = doc.internal.pageSize.getWidth();
+  const ph     = doc.internal.pageSize.getHeight();
+  const margin = 50; const lh = 14; const maxW = pw - 2 * margin;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+  let y = margin;
+  for (const line of (await file.text()).split('\n')) {
+    for (const wl of doc.splitTextToSize(line || ' ', maxW)) {
+      if (y + lh > ph - margin) { doc.addPage(); y = margin; }
+      doc.text(wl, margin, y); y += lh;
+    }
+  }
+  return doc.output('blob');
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
 updateSliderFill();
 
-window.convertFile   = convertFile;
-window.resetToUpload = resetToUpload;
-window.setQuality    = setQuality;
+window.clearAll         = clearAll;
+window.convertAll       = convertAll;
+window.downloadZip      = downloadZip;
+window.onFormatChange   = onFormatChange;
+window.removeFile       = removeFile;
+window.setQuality       = setQuality;
+window.onListDragOver   = onListDragOver;
+window.onListDragLeave  = onListDragLeave;
+window.onListDrop       = onListDrop;

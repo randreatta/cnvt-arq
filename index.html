@@ -26,8 +26,8 @@
   <main>
     <div class="card">
 
-      <!-- ── STEP 1: Upload ─────────────────────────────── -->
-      <section id="step-upload">
+      <!-- ── ESTADO VAZIO: tela inicial ─────────────────── -->
+      <section id="view-empty">
         <h1>Converta seu arquivo</h1>
 
         <div class="drop-zone" id="dropZone">
@@ -37,73 +37,76 @@
               <line x1="12" y1="12" x2="12" y2="21"/>
               <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
             </svg>
-            <p class="drop-label">Arraste e solte seu arquivo aqui</p>
+            <p class="drop-label">Arraste e solte até 20 arquivos aqui</p>
             <p class="drop-or">ou</p>
             <button class="btn-select" onclick="document.getElementById('fileInput').click()">
-              Selecionar arquivo
+              Selecionar arquivos
             </button>
           </div>
-          <input type="file" id="fileInput" hidden
-            accept=".csv,.xlsx,.xls,.docx,.txt,.jpeg,.jpg,.png,.webp,.gif,.bmp,.tiff,.tif" />
         </div>
 
         <div class="format-categories">
           <div class="format-cat">
             <span class="cat-label">Planilhas</span>
-            <span class="pill">CSV</span>
-            <span class="pill">XLSX</span>
-            <span class="pill">XLS</span>
+            <span class="pill">CSV</span><span class="pill">XLSX</span><span class="pill">XLS</span>
           </div>
           <div class="format-cat">
             <span class="cat-label">Documentos</span>
-            <span class="pill">DOCX</span>
-            <span class="pill">TXT</span>
+            <span class="pill">DOCX</span><span class="pill">TXT</span>
           </div>
           <div class="format-cat">
             <span class="cat-label">Imagens</span>
-            <span class="pill">JPEG</span>
-            <span class="pill">PNG</span>
-            <span class="pill">WebP</span>
-            <span class="pill">GIF</span>
-            <span class="pill">BMP</span>
-            <span class="pill">TIFF</span>
+            <span class="pill">JPEG</span><span class="pill">PNG</span><span class="pill">WebP</span>
+            <span class="pill">GIF</span><span class="pill">BMP</span><span class="pill">TIFF</span>
           </div>
         </div>
 
         <div id="error-box" class="error-box hidden">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/>
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
             <line x1="12" y1="16" x2="12.01" y2="16"/>
           </svg>
           <span id="error-text"></span>
         </div>
       </section>
 
-      <!-- ── STEP 2: Choose format ──────────────────────── -->
-      <section id="step-convert" class="hidden">
-        <div class="file-summary">
-          <div class="file-icon-wrap">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-            </svg>
-          </div>
-          <div class="file-meta">
-            <div class="file-name" id="detectedFilename">arquivo.csv</div>
-            <div class="file-detail">
-              <span class="badge-format" id="detectedFormat">CSV</span>
-              <span class="file-size" id="fileSize"></span>
-            </div>
+      <!-- ── ESTADO LISTA: arquivos adicionados ─────────── -->
+      <section id="view-list" class="hidden">
+
+        <!-- Barra superior: contador + botão adicionar -->
+        <div class="list-header">
+          <span class="list-counter">
+            <span id="fileCount">0</span>/20 arquivos
+          </span>
+          <div class="list-header-actions">
+            <button class="btn-ghost btn-sm" id="btnAddMore" onclick="document.getElementById('fileInput').click()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Adicionar
+            </button>
+            <button class="btn-ghost btn-sm" onclick="clearAll()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              </svg>
+              Limpar tudo
+            </button>
           </div>
         </div>
 
-        <h2>Converter para:</h2>
-        <div class="format-options" id="formatOptions"></div>
+        <!-- Lista de arquivos -->
+        <div class="file-list" id="fileList"
+             ondragover="onListDragOver(event)"
+             ondragleave="onListDragLeave(event)"
+             ondrop="onListDrop(event)">
+        </div>
 
-        <!-- Seletor de qualidade (JPEG / WebP) -->
+        <!-- Slider de qualidade (global, para JPEG/WebP) -->
         <div class="quality-section hidden" id="qualitySection">
           <div class="quality-header">
-            <label for="qualitySlider">Qualidade da imagem</label>
+            <label for="qualitySlider">Qualidade — JPEG / WebP</label>
             <span class="quality-badge" id="qualityValue">85%</span>
           </div>
           <input type="range" id="qualitySlider" min="1" max="100" value="85" class="quality-slider" />
@@ -113,66 +116,50 @@
             <button class="preset-btn active" data-q="85" onclick="setQuality(85)">Alta<small>85%</small></button>
             <button class="preset-btn" data-q="100" onclick="setQuality(100)">Máxima<small>100%</small></button>
           </div>
-          <p class="quality-hint">
-            Qualidade menor = arquivo menor. Útil para sites com limite de tamanho de upload.
-          </p>
+          <p class="quality-hint">Qualidade menor = arquivo menor. Aplica-se a todos os JPEG/WebP do lote.</p>
         </div>
 
-        <div class="action-row">
-          <button class="btn-back" onclick="resetToUpload()">
+        <!-- Rodapé de ação -->
+        <div class="list-footer" id="listFooter">
+          <span class="progress-text hidden" id="progressText"></span>
+          <button class="btn-convert-all" id="btnConvertAll" onclick="convertAll()">
+            Converter tudo
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="19" y1="12" x2="5" y2="12"/>
-              <polyline points="12 19 5 12 12 5"/>
-            </svg>
-            Outro arquivo
-          </button>
-          <button class="btn-convert" id="btnConvert" disabled onclick="convertFile()">
-            Converter
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="9 18 15 12 9 6"/>
+              <line x1="5" y1="12" x2="19" y2="12"/>
+              <polyline points="12 5 19 12 12 19"/>
             </svg>
           </button>
         </div>
-      </section>
 
-      <!-- ── STEP 3: Download ───────────────────────────── -->
-      <section id="step-download" class="hidden">
-        <div class="success-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
+        <!-- Resultado do lote (aparece após conversão) -->
+        <div class="batch-result hidden" id="batchResult">
+          <div class="result-summary" id="resultSummary"></div>
+          <div class="result-actions">
+            <button class="btn-ghost" onclick="clearAll()">Nova conversão</button>
+            <button class="btn-download-zip" id="btnDownloadZip" onclick="downloadZip()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Baixar ZIP
+            </button>
+          </div>
         </div>
-        <h2>Conversão concluída!</h2>
-        <p class="conversion-info" id="conversionInfo"></p>
 
-        <a class="btn-download" id="downloadLink" href="#">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7 10 12 15 17 10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
-          Baixar arquivo
-        </a>
-
-        <button class="btn-back center" onclick="resetToUpload()">
-          Converter outro arquivo
-        </button>
-      </section>
-
-      <!-- ── Loading ────────────────────────────────────── -->
-      <section id="loading" class="hidden loading-section">
-        <div class="spinner"></div>
-        <p id="loadingText">Processando...</p>
       </section>
 
     </div>
   </main>
 
-  <!-- Bibliotecas carregadas pelo CDN — sem build step necessário -->
+  <input type="file" id="fileInput" hidden multiple
+    accept=".csv,.xlsx,.xls,.docx,.txt,.jpeg,.jpg,.png,.webp,.gif,.bmp,.tiff,.tif" />
+
   <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
