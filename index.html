@@ -28,7 +28,7 @@
       <!-- ── STEP 1: Upload ─────────────────────────────── -->
       <section id="step-upload">
         <h1>Converta seu arquivo</h1>
-        <p class="subtitle">Envie um arquivo, escolha o formato de saída e baixe.</p>
+        <p class="subtitle">Tudo processado no seu navegador — nenhum arquivo é enviado a servidores.</p>
 
         <div class="drop-zone" id="dropZone">
           <div class="drop-zone-inner">
@@ -47,7 +47,6 @@
             accept=".csv,.xlsx,.xls,.docx,.txt,.jpeg,.jpg,.png,.webp,.gif,.bmp,.tiff,.tif" />
         </div>
 
-        <!-- Formatos aceitos por categoria -->
         <div class="format-categories">
           <div class="format-cat">
             <span class="cat-label">Planilhas</span>
@@ -101,7 +100,7 @@
         <h2>Converter para:</h2>
         <div class="format-options" id="formatOptions"></div>
 
-        <!-- Seletor de qualidade (aparece apenas para JPEG/WebP) -->
+        <!-- Seletor de qualidade (JPEG / WebP) -->
         <div class="quality-section hidden" id="qualitySection">
           <div class="quality-header">
             <label for="qualitySlider">Qualidade da imagem</label>
@@ -169,6 +168,11 @@
     </div>
   </main>
 
+  <!-- Bibliotecas carregadas pelo CDN — sem build step necessário -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

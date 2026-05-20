@@ -5,8 +5,12 @@ __pycache__/
 *.pyd
 .env
 .DS_Store
-uploads/*
-!uploads/.gitkeep
+uploads/
+static/
 dist/
 build/
 *.egg-info/
+main.py
+requirements.txt
+Procfile
+run.sh
